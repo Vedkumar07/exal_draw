@@ -3,48 +3,112 @@ import jwt from "jsonwebtoken";
 import { JWT_SECRET } from "@repo/backend-common/config";
 import middleware from "./middleware";
 import {CreateUserSchema,SigninSchema,CreateRoomSchema} from "@repo/common/types";
+import {prismaClient} from "@repo/db/client"
+
+
 const app=express();
-app.post("/signup",async(req,res)=>{
-    const data=CreateUserSchema.safeParse(req.body);
-    if(!data.success){
+app.use(express.json());
+
+
+app.post("/signup",async (req,res)=>{
+    const parseData=CreateUserSchema.safeParse(req.body);
+    if(!parseData.success){
+        console.log(parseData.error);
          res.json({
             message:"Incorrect input"
         })
+        return;
     }
-    res.json({
-        message:"signin"
-    })
+    try{
+        const user=await prismaClient.user.create({
+        data:{
+            email:parseData.data?.username,
+            password:parseData.data?.password,
+            name:parseData.data?.name
+            }
+       })
+       res.json({
+          userId:user.id
+        })
+    }catch(e){
+        res.status(411).json({
+            mesage:"User already exist"
+        })
+    }
 });
-app.post("/signin",(req,res)=>{
-    const data=SigninSchema.safeParse(req.body);
-    if(!data.success){
+app.post("/signin",async (req,res)=>{
+    const parseData=SigninSchema.safeParse(req.body);
+    if(!parseData.success){
          res.json({
             message:"Incorrect input"
         })
+        return;
     }
-    res.json({
-        message:"signin"
+    const user=await prismaClient.user.findFirst({
+       where:{
+          email:parseData.data.username,
+          password:parseData.data.password
+        }
     })
-   const userId=1;
-   const token= jwt.sign({
-        userId
-    },JWT_SECRET);
+    if(!user){
+      res.status(403).json({
+         message:"user dosent exist"
+        })
+    }
+    const token = jwt.sign({ userId: user?.id }, JWT_SECRET, { expiresIn: "1h" });
+
+        console.log(`"token":${token}`);
     res.json({
-        token
-    })
+          token
+        })
 });
 app.post("/room",middleware,async(req,res)=>{
-    const data=CreateRoomSchema.safeParse(req.body);
-    if(!data.success){
+    const parseData=CreateRoomSchema.safeParse(req.body);
+    if(!parseData.success){
          res.json({
             message:"Incorrect input"
         })
+        return;
     }
-    res.json({
-        message:"signin"
+    //@ts-ignore
+    const userId=req.userId;
+    console.log(`userId:${userId}`);
+    try{
+        const room=await prismaClient.room.create({
+        data:{
+            slug:parseData.data.name,
+            adminId:userId
+        }
     })
     res.json({
-        roomId:123
+        roomId:room.id
     })
+    }catch(e){
+         res.status(411).json({
+           error:e
+        })
+    }
 });
+app.get("/chats/:roomId",async (req,res)=>{
+    try{
+        const roomId=Number(req.params.roomId);
+        console.log(req.params.roomId);
+        const message=await prismaClient.chat.findMany({
+        where:{
+            roomId:roomId
+        },
+        orderBy:{
+            id:"desc"
+        },
+        take:50
+        })
+        res.json({
+          message
+        })
+    }catch(e){
+        res.json({
+            error:e
+        })
+    }
+})
 app.listen(3001);
